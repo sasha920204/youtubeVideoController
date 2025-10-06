@@ -1,6 +1,6 @@
 {
   "name": "video-controller",
-  "version": "4.1.0",
+  "version": "4.2.0",
   "description": "Chrome extension for advanced video control",
   "main": "popup.js",
   "scripts": {

@@ -1,0 +1,128 @@
+===== Short Description (Max 132 characters) =====
+
+Control YouTube video speed, pitch, and loop sections. Enhanced loop protection prevents auto-play skipping for perfect practice.
+
+
+===== Detailed Description =====
+
+🎵 Video Controller - Advanced YouTube Video Controller
+
+The ultimate YouTube controller for music practice, language learning, and lecture viewing!
+
+
+✨ Key Features
+
+🎛️ Global Master ON/OFF Switch
+• Control all features with one click
+• Instantly restore to original state if issues occur
+• ON/OFF state is automatically saved
+
+
+🚀 Precise Playback Speed Control
+• Fine-tune in 0.1x increments (0.25x ~ 4.0x)
+• Preset buttons: 50%, 60%, 70%, 80%, 90%, 100%, 110%, 125%, 150%, 175%, 200%
+• Quick adjustment with +/- buttons
+• Individual ON/OFF for speed control
+
+
+🎵 Pitch (Key) Control
+• Adjust pitch in semitone units (-24 ~ +24 semitones, 2 octaves)
+• Perfect for music practice: Match song key to your vocal range
+• Instrument practice: Adjust original key to match your instrument
+• Display current note name (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
+• Enhanced performance using AudioWorkletNode technology
+
+
+🔄 Perfect Loop/Repeat
+• Never skips to next video (enhanced protection system)
+• Repeat single video even in autoplay playlists
+• Set section with slider or direct time input ("1:30" or "90")
+• Current playback position indicator (yellow)
+• Jump to start/end point instantly
+
+
+🔄 Smart Track Change Detection & Auto Reset
+• Detects track changes using 5 methods (title, URL, time jump, end→start, end event)
+• Automatically resets to default when track changes
+• Start fresh with clean state for each new track
+• Fast detection every 2 seconds
+
+
+💡 Use Cases
+
+🎸 Music Practice
+• Loop difficult sections for focused practice
+• Lower pitch to sing comfortably
+• Slow down speed to learn fast passages
+
+📚 Language Learning
+• Repeat listening sections for accurate pronunciation
+• Adjust speed for beginners to follow easily
+• Repeat important phrases for learning
+
+🎓 Lectures/Education
+• Repeat important concept sections
+• Slow down fast lectures, speed up slow ones
+• Section learning for perfect understanding
+
+
+🛡️ v4.2.0 Bug Fixes & Improvements
+
+✅ Fixed bug where dragging loop end point skips to next track
+✅ Fixed slider UI exceeding screen bounds
+✅ Enhanced loop protection (0.3s → 0.5s pre-emptive, 50ms → 30ms interval)
+✅ Migrated to AudioWorkletNode (removed Deprecated warning)
+✅ Improved track change detection (5s → 2s interval)
+✅ Removed per-song state saving (always starts with defaults)
+✅ Improved global ON/OFF toggle UI
+✅ Code cleanup and optimization (3KB reduction)
+
+
+🎯 Perfect Compatibility
+
+• Full YouTube support
+• Chrome Extension Manifest V3
+• Modern UI built with React 18
+• Latest Web Audio API technology
+
+
+📖 How to Use
+
+1. Play a YouTube video
+2. Click the extension icon in the top-right corner
+3. Use desired features in the popup:
+   - Speed: Click +/- buttons or presets
+   - Pitch: Adjust with semitone/tone/octave buttons
+   - Loop: Set section with slider or time input → Start loop
+
+
+⚠️ Important Notes
+
+• Only works on YouTube
+• Some DRM-protected content may not be supported
+• When pitch control is active, original video is muted and converted audio plays
+
+
+🔒 Privacy
+
+• No user data collection
+• All settings stored locally only
+• No internet connection required (except YouTube)
+
+
+💬 Feedback & Support
+
+If you encounter issues or have suggestions, please submit an issue on our GitHub repository.
+Your feedback helps us build a better extension!
+
+
+🎓 Open Source Project
+
+GitHub: https://github.com/sasha920204/youtubeVideoController
+MIT License
+
+
+---
+
+💪 Music practice, language learning, and lecture viewing made easier!
+Learn efficiently with Video Controller! 🎵
