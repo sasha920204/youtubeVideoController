@@ -1,0 +1,27 @@
+{
+  "name": "video-controller",
+  "version": "4.1.0",
+  "description": "Chrome extension for advanced video control",
+  "main": "popup.js",
+  "scripts": {
+    "build": "webpack --mode=production",
+    "build:dev": "webpack --mode=development",
+    "dev": "webpack --mode=development --watch"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tone": "14.9.17"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.22.0",
+    "@babel/preset-react": "^7.22.0",
+    "babel-loader": "^9.1.0",
+    "copy-webpack-plugin": "^13.0.0",
+    "css-loader": "^6.8.1",
+    "style-loader": "^3.3.3",
+    "terser-webpack-plugin": "^5.3.14",
+    "webpack": "^5.88.0",
+    "webpack-cli": "^5.1.0"
+  }
+}
