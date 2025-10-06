@@ -32,11 +32,11 @@ const LoopControl = ({
     return (percentage / 100) * videoDuration;
   };
 
-  // 끝점을 안전하게 제한 (비디오 끝으로부터 0.5초 마진)
+  // 끝점을 안전하게 제한 (비디오 끝으로부터 1초 마진)
   const constrainEndPoint = useCallback((endTime) => {
     let newEnd = Math.max(endTime, loopStart + 1);
-    if (videoDuration > 0 && newEnd > videoDuration - 0.5) {
-      newEnd = Math.max(videoDuration - 0.5, loopStart + 1);
+    if (videoDuration > 0 && newEnd > videoDuration - 1) {
+      newEnd = Math.max(videoDuration - 1, loopStart + 1);
     }
     return newEnd;
   }, [loopStart, videoDuration]);
@@ -136,9 +136,9 @@ const LoopControl = ({
     }
   };
 
-  const startPercentage = timeToPercentage(loopStart);
-  const endPercentage = timeToPercentage(loopEnd);
-  const currentPercentage = timeToPercentage(currentTime);
+  const startPercentage = Math.min(100, Math.max(0, timeToPercentage(loopStart)));
+  const endPercentage = Math.min(100, Math.max(0, timeToPercentage(loopEnd)));
+  const currentPercentage = Math.min(100, Math.max(0, timeToPercentage(currentTime)));
 
   return (
     <div className={`control-section ${!isEnabled ? 'disabled' : ''}`}>

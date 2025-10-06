@@ -26,6 +26,7 @@ let cachedVolume = 1.0; // 마지막 설정된 볼륨 (0~1) - 기본값 100%
 // 곡 변경 감지를 위한 변수들
 let lastVideoTitle = '';
 let lastVideoCurrentTime = 0;
+let lastVideoUrl = '';
 let videoChangeCheckInterval = null;
 
 async function ensureAudioContextResumed(ctx) {
@@ -223,28 +224,23 @@ function checkForVideoChange() {
   
   const currentTitle = getVideoTitle();
   const currentTime = video.currentTime;
+  const currentUrl = window.location.href;
   
-  // 제목이 변경되었거나, 현재 시간이 크게 뒤로 건너뛴 경우 (새 곡으로 판단)
+  // 곡 변경 감지 조건
   const titleChanged = currentTitle !== lastVideoTitle && lastVideoTitle !== '';
-  const timeJumpedBack = currentTime < lastVideoCurrentTime - 30; // 30초 이상 뒤로 이동
-  const timeJumpedForward = currentTime > lastVideoCurrentTime + 60; // 1분 이상 앞으로 이동
+  const urlChanged = currentUrl !== lastVideoUrl && lastVideoUrl !== '';
+  const timeJumpedBack = currentTime < lastVideoCurrentTime - 10; // 10초 이상 뒤로
+  const timeJumpedForward = currentTime > lastVideoCurrentTime + 30; // 30초 이상 앞으로
+  const timeResetToStart = lastVideoCurrentTime > 5 && currentTime < 2; // 끝에서 처음으로
   
-  if (titleChanged || timeJumpedBack || timeJumpedForward) {
-    console.log('🎵 Video change detected:', {
-      titleChanged,
-      timeJumpedBack,
-      timeJumpedForward,
-      oldTitle: lastVideoTitle,
-      newTitle: currentTitle,
-      oldTime: lastVideoCurrentTime,
-      newTime: currentTime
-    });
-    
+  if (titleChanged || urlChanged || timeJumpedBack || timeJumpedForward || timeResetToStart) {
+    console.log('🎵 곡 변경 감지 - 모든 설정 리셋');
     resetAllControls();
   }
   
   lastVideoTitle = currentTitle;
   lastVideoCurrentTime = currentTime;
+  lastVideoUrl = currentUrl;
 }
 
 // 비디오 변경 감지 시작
@@ -255,12 +251,24 @@ function startVideoChangeDetection() {
   
   // 초기값 설정
   lastVideoTitle = getVideoTitle();
+  lastVideoUrl = window.location.href;
   const video = getYouTubeVideo();
   lastVideoCurrentTime = video ? video.currentTime : 0;
   
-  // 5초마다 체크
-  videoChangeCheckInterval = setInterval(checkForVideoChange, 5000);
-  console.log('🎵 Video change detection started');
+  // 비디오 종료 이벤트 리스너 추가 (다음 곡으로 넘어갈 때 감지)
+  if (video) {
+    video.addEventListener('ended', () => {
+      // 루프 중이 아닐 때만 리셋 (루프 중에는 종료 이벤트가 차단됨)
+      if (!isLooping) {
+        console.log('🎵 곡 종료 감지 - 다음 곡 대기');
+        setTimeout(checkForVideoChange, 1000);
+      }
+    });
+  }
+  
+  // 2초마다 체크 (더 빠른 감지)
+  videoChangeCheckInterval = setInterval(checkForVideoChange, 2000);
+  console.log('🎵 곡 변경 감지 시작 (자동 리셋)');
 }
 
 // 비디오 변경 감지 중지
@@ -364,19 +372,22 @@ function setLoop(start, end, enabled) {
     return false;
   }
 
-  if (end >= video.duration - 0.5 && start === 0) {
+  if (end >= video.duration - 1 && start === 0) {
     console.log('⚠️ Full video loop disabled');
     isLooping = false;
     return true;
   }
 
   loopStart = start;
-  loopEnd = Math.min(end, video.duration - 0.5);
+  loopEnd = Math.min(end, video.duration - 1); // 끝점은 항상 1초 마진
   isLooping = true;
 
-  // 1. 비디오 종료 이벤트 차단 (다음 곡 넘어가기 방지)
+  console.log(`🔒 루프 활성화: [${loopStart.toFixed(1)}s - ${loopEnd.toFixed(1)}s] | isLooping: ${isLooping}`);
+
+  // 1. 비디오 종료 이벤트 차단 (최우선 - capture phase)
   videoEndedHandler = (e) => {
     if (isLooping) {
+      console.log('🛑 비디오 종료 차단 → 루프 시작점으로');
       e.preventDefault();
       e.stopPropagation();
       e.stopImmediatePropagation();
@@ -385,31 +396,44 @@ function setLoop(start, end, enabled) {
       return false;
     }
   };
-  video.addEventListener('ended', videoEndedHandler, true);
+  video.addEventListener('ended', videoEndedHandler, { capture: true, passive: false });
 
-  // 2. 선제적 루프 점프 (0.3초 전에 미리 돌아감)
+  // 2. 선제적 루프 점프 (0.5초 전부터 차단)
   videoTimeupdateHandler = () => {
     if (!isLooping || video.paused) return;
     
     const currentTime = video.currentTime;
     
-    if (currentTime >= loopEnd - 0.3 || currentTime >= loopEnd) {
+    // 끝점 0.5초 전부터 적극 차단
+    if (currentTime >= loopEnd - 0.5) {
+      console.log(`🔁 선제 점프: ${currentTime.toFixed(1)}s → ${loopStart.toFixed(1)}s`);
       video.currentTime = loopStart;
     } else if (currentTime < loopStart) {
+      console.log(`⏮️ 범위 이탈 복귀: ${currentTime.toFixed(1)}s → ${loopStart.toFixed(1)}s`);
       video.currentTime = loopStart;
     }
   };
   video.addEventListener('timeupdate', videoTimeupdateHandler);
 
-  // 3. 백업 인터벌 (이벤트 놓침 대비)
+  // 3. 백업 인터벌 (더 자주 체크 - 30ms)
   loopInterval = setInterval(() => {
     if (!video || video.paused || !isLooping) return;
-    if (video.currentTime >= loopEnd) {
+    
+    const currentTime = video.currentTime;
+    
+    // 끝점 근처면 즉시 차단
+    if (currentTime >= loopEnd - 0.5) {
       video.currentTime = loopStart;
     }
-  }, 50);
+    
+    // 비디오 duration 근처도 차단 (YouTube 자동재생 방지)
+    if (currentTime >= video.duration - 1) {
+      console.log('🚨 비디오 끝 도달 차단 → 루프 시작');
+      video.currentTime = loopStart;
+    }
+  }, 30);
 
-  console.log(`✅ Loop active with 3-layer protection`);
+  console.log(`✅ 3단계 루프 보호 활성화 (0.5초 선제 차단)`);
   return true;
 }
 

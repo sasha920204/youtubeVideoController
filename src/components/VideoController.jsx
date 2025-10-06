@@ -48,65 +48,35 @@ const VideoController = () => {
     return 'default';
   };
 
-  const saveStateToStorage = async (stateUpdate) => {
+  // 전역 설정만 저장 (곡별 저장 제거)
+  const saveGlobalSettings = async (settings) => {
     try {
-      const songKey = await getCurrentSongKey();
-      const storageKey = `song_${songKey}`;
-      const currentState = await chrome.storage.local.get(storageKey);
-      
-      const newState = {
-        ...currentState[storageKey],
-        ...stateUpdate,
-        lastUpdated: Date.now()
-      };
-      
-      await chrome.storage.local.set({ [storageKey]: newState });
+      await chrome.storage.local.set(settings);
     } catch (error) {
-      console.error('Failed to save state:', error);
+      console.error('Failed to save settings:', error);
     }
   };
 
   const loadStateFromStorage = async () => {
     try {
-      const songKey = await getCurrentSongKey();
-      const storageKey = `song_${songKey}`;
-      
-      // 전역 ON/OFF 상태 로드
+      // 전역 ON/OFF 상태만 로드
       const globalResult = await chrome.storage.local.get(['isGlobalEnabled']);
       if (globalResult.isGlobalEnabled !== undefined) {
         setIsGlobalEnabled(globalResult.isGlobalEnabled);
       }
       
-      const result = await chrome.storage.local.get([storageKey]);
-      const songData = result[storageKey];
+      // 모든 설정을 기본값으로 시작 (곡별 저장 제거)
+      setCurrentSpeed(1.0);
+      setCurrentPitch(0);
+      setLoopStart(0);
+      setLoopEnd(0);
+      setIsLooping(false);
+      setIsSpeedEnabled(true);
+      setIsPitchEnabled(true);
+      setIsLoopEnabled(true);
       
-      if (songData) {
-        const thirtyMinutesAgo = Date.now() - (30 * 60 * 1000);
-        if (songData.lastUpdated && songData.lastUpdated > thirtyMinutesAgo) {
-          if (songData.currentSpeed !== undefined) setCurrentSpeed(songData.currentSpeed);
-          if (songData.loopStart !== undefined) setLoopStart(songData.loopStart);
-          if (songData.loopEnd !== undefined) {
-            setLoopEnd(songData.loopEnd);
-            setIsInitialLoopEndSet(true);
-          }
-          if (songData.isLooping !== undefined) setIsLooping(songData.isLooping);
-          if (songData.isSpeedEnabled !== undefined) setIsSpeedEnabled(songData.isSpeedEnabled);
-          if (songData.isLoopEnabled !== undefined) setIsLoopEnabled(songData.isLoopEnabled);
-          if (songData.isPitchEnabled !== undefined) setIsPitchEnabled(songData.isPitchEnabled);
-          if (songData.currentPitch !== undefined) setCurrentPitch(songData.currentPitch);
-        }
-      } else {
-        // 새로운 곡 - 기본값 설정
-        setCurrentSpeed(1.0);
-        setCurrentPitch(0);
-        setLoopStart(0);
-        setLoopEnd(0);
-        setIsLooping(false);
-        setIsSpeedEnabled(true);
-        setIsPitchEnabled(true);
-        setIsLoopEnabled(true);
-      }
       setIsStateLoaded(true);
+      console.log('✅ 기본 설정으로 시작 (곡별 저장 비활성화)');
     } catch (error) {
       console.error('Failed to load state:', error);
       setIsStateLoaded(true);
@@ -188,11 +158,15 @@ const VideoController = () => {
             setVideoDuration(result.duration);
             setCurrentTime(result.currentTime);
             setVideoTitle(result.title || "Unknown Video");
-            // 초기 loopEnd가 설정되지 않았고, 상태가 로드되었으며, 저장된 loopEnd가 없을 때만 비디오 길이로 설정
+            
+            // loopEnd 초기화 또는 수정
             if (!isInitialLoopEndSet && isStateLoaded && loopEnd === 0 && result.duration > 0) {
+              // 새 곡 - 비디오 길이로 설정
               setLoopEnd(result.duration);
               setIsInitialLoopEndSet(true);
-              console.log(`Set initial loopEnd to video duration: ${result.duration}`);
+            } else if (loopEnd > result.duration && result.duration > 0) {
+              // loopEnd가 비디오 길이보다 크면 비디오 길이로 제한 (1초 마진)
+              setLoopEnd(Math.max(result.duration - 1, 1));
             }
           }
         }
@@ -255,11 +229,6 @@ const VideoController = () => {
     if (!isGlobalEnabled || !isSpeedEnabled) return;
     setCurrentSpeed(speed);
     await sendMessage({ action: "setPlaybackRate", speed });
-    
-    // 상태 저장
-    if (isStateLoaded) {
-      await saveStateToStorage({ currentSpeed: speed });
-    }
   };
 
 
@@ -269,16 +238,9 @@ const VideoController = () => {
     const newState = !isSpeedEnabled;
     setIsSpeedEnabled(newState);
     if (!newState) {
-      // Disable: restore to normal speed
       await sendMessage({ action: "setPlaybackRate", speed: 1.0 });
     } else {
-      // Enable: apply current speed setting
       await sendMessage({ action: "setPlaybackRate", speed: currentSpeed });
-    }
-    
-    // 상태 저장
-    if (isStateLoaded) {
-      await saveStateToStorage({ isSpeedEnabled: newState });
     }
   };
 
@@ -289,20 +251,12 @@ const VideoController = () => {
     setLoopStart(start);
     setLoopEnd(end);
 
-    // 슬라이더 조절 시 해당 지점으로 이동
     if (seekToPoint !== null) {
       await sendMessage({ action: "seekTo", time: seekToPoint });
     }
 
-    // 루프가 활성화되어 있으면 새로운 범위로 업데이트
     if (isLooping) {
-      console.log(`🔄 Updating loop range: ${start.toFixed(2)}s - ${end.toFixed(2)}s`);
       await sendMessage({ action: "setLoop", start, end, enabled: true });
-    }
-    
-    // 상태 저장
-    if (isStateLoaded) {
-      await saveStateToStorage({ loopStart: start, loopEnd: end });
     }
   };
 
@@ -311,19 +265,12 @@ const VideoController = () => {
     const newLoopState = !isLooping;
     setIsLooping(newLoopState);
     
-    console.log(`🔄 Loop toggle: ${newLoopState ? 'ENABLING' : 'DISABLING'} loop (${loopStart.toFixed(2)}s - ${loopEnd.toFixed(2)}s)`);
-    
     await sendMessage({
       action: "setLoop",
       start: loopStart,
       end: loopEnd,
       enabled: newLoopState,
     });
-    
-    // 상태 저장
-    if (isStateLoaded) {
-      await saveStateToStorage({ isLooping: newLoopState });
-    }
   };
 
   const handleLoopEnabledToggle = async () => {
@@ -331,21 +278,12 @@ const VideoController = () => {
     const newState = !isLoopEnabled;
     setIsLoopEnabled(newState);
     if (!newState && isLooping) {
-      // Disable: stop looping
       setIsLooping(false);
       await sendMessage({
         action: "setLoop",
         start: loopStart,
         end: loopEnd,
         enabled: false,
-      });
-    }
-    
-    // 상태 저장
-    if (isStateLoaded) {
-      await saveStateToStorage({ 
-        isLoopEnabled: newState,
-        isLooping: newState ? isLooping : false
       });
     }
   };
@@ -377,14 +315,8 @@ const VideoController = () => {
 
   const handlePitchChange = async (pitch) => {
     if (!isGlobalEnabled || !isPitchEnabled) return;
-    // 전체 범위 허용: -24 ~ +24
     const clamped = Math.max(-24, Math.min(24, pitch));
     setCurrentPitch(clamped);
-    
-    // 상태 저장 (UI 표시값으로 저장)
-    if (isStateLoaded) {
-      await saveStateToStorage({ currentPitch: clamped });
-    }
   };
 
   const handlePitchToggle = async () => {
@@ -392,18 +324,9 @@ const VideoController = () => {
     const newState = !isPitchEnabled;
     setIsPitchEnabled(newState);
     if (!newState) {
-      // Disable: reset to original pitch and unmute video
       await sendMessage({ action: "disablePitch" });
     } else {
-      // Enable: apply current pitch setting
       await sendMessage({ action: "initializePitch" });
-      // PitchControl에서 반전 처리를 하므로 여기서는 표시값 그대로 전달
-      // PitchControl이 자동으로 반전시켜서 content script에 전송함
-    }
-    
-    // 상태 저장
-    if (isStateLoaded) {
-      await saveStateToStorage({ isPitchEnabled: newState });
     }
   };
 
@@ -446,24 +369,10 @@ const VideoController = () => {
       setIsLoopEnabled(true);
       setIsPitchEnabled(true);
       
-      // Content script에 리셋 명령 전송 (볼륨은 사용자 설정 유지)
+      // Content script에 리셋 명령 전송
       await sendMessage({ action: "setPlaybackRate", speed: 1.0 });
       await sendMessage({ action: "setLoop", start: 0, end: videoDuration, enabled: false });
       await sendMessage({ action: "setPitch", pitch: 0 });
-      
-      // 저장된 상태도 기본값으로 업데이트
-      if (isStateLoaded) {
-        await saveStateToStorage({
-          currentSpeed: 1.0,
-          loopStart: 0,
-          loopEnd: videoDuration,
-          isLooping: false,
-          currentPitch: 0,
-          isSpeedEnabled: true,
-          isLoopEnabled: true,
-          isPitchEnabled: true
-        });
-      }
       
       console.log('✅ All controls reset to default');
     } catch (error) {
