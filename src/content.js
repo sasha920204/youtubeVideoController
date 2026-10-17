@@ -32,6 +32,15 @@ let videoChangeCheckInterval = null;
 // 화면(팝업)에 설정된 재생 속도. 유튜브 플레이어가 속도를 되돌리면 이 값으로 다시 맞춘다
 let desiredPlaybackRate = null;
 const rateGuardedVideos = new WeakSet();
+// 플레이어와 속도를 무한히 다투지 않도록 1초에 몇 번까지만 되돌린다
+const RATE_RESTORE_LIMIT = 3;
+let rateRestoreWindowStart = 0;
+let rateRestoreCount = 0;
+
+// 구간 반복 점프 직후 잠깐은 다시 점프하지 않는다 (이동 결과가 A보다 아주 조금 앞일 수 있음)
+const LOOP_START_TOLERANCE = 0.25; // 초
+const LOOP_JUMP_COOLDOWN_MS = 300;
+let lastLoopJumpAt = 0;
 
 async function ensureAudioContextResumed(ctx) {
   if (!ctx) return;
@@ -337,10 +346,19 @@ function guardPlaybackRate(video) {
   if (rateGuardedVideos.has(video)) return;
   rateGuardedVideos.add(video);
   video.addEventListener('ratechange', () => {
-    if (desiredPlaybackRate !== null && video.playbackRate !== desiredPlaybackRate) {
-      console.log(`⚡ Playback rate changed to ${video.playbackRate}x → restoring ${desiredPlaybackRate}x`);
-      video.playbackRate = desiredPlaybackRate;
+    if (desiredPlaybackRate === null || video.playbackRate === desiredPlaybackRate) return;
+    const now = Date.now();
+    if (now - rateRestoreWindowStart > 1000) {
+      rateRestoreWindowStart = now;
+      rateRestoreCount = 0;
     }
+    if (rateRestoreCount >= RATE_RESTORE_LIMIT) {
+      console.log('⚡ Player keeps changing playback rate - not fighting it');
+      return;
+    }
+    rateRestoreCount += 1;
+    console.log(`⚡ Playback rate changed to ${video.playbackRate}x → restoring ${desiredPlaybackRate}x`);
+    video.playbackRate = desiredPlaybackRate;
   });
 }
 
@@ -349,6 +367,7 @@ function setPlaybackRate(speed) {
   const video = getYouTubeVideo();
   if (video) {
     desiredPlaybackRate = speed;
+    rateRestoreCount = 0;
     guardPlaybackRate(video);
     video.playbackRate = speed;
     console.log(`Playback rate set to: ${speed}x`);
@@ -422,6 +441,7 @@ function setLoop(start, end, enabled) {
 
   loopStart = start;
   loopEnd = Math.min(end, video.duration - 1); // 끝점은 항상 1초 마진
+  lastLoopJumpAt = 0;
   isLooping = true;
 
   console.log(`🔒 루프 활성화: [${loopStart.toFixed(1)}s - ${loopEnd.toFixed(1)}s] | isLooping: ${isLooping}`);
@@ -444,30 +464,38 @@ function setLoop(start, end, enabled) {
   // 예전에는 B 0.5초 전에 미리 점프해서 B 직전이 잘렸고, B를 조정하면(B-1초로 이동) 0.5초 만에 튕겨 나갔다.
   // 끝점은 이미 영상 끝에서 1초 전으로 제한되므로 B에서 바로 점프해도 자동재생으로 넘어가지 않는다.
   // 이동(seek)이 진행 중일 때 다시 이동시키면 버퍼링이 겹쳐 버벅이므로 건너뛴다.
+  // 점프 직후에는 다시 점프하지 않고, A보다 조금(0.25초 이내) 앞인 것은 범위 안으로 본다.
+  // 브라우저는 위치를 마이크로초 단위로 저장해서 70.123456789초로 이동하면 70.123456초가 된다.
+  // 정확히 비교하면 "A보다 앞"으로 판단해 계속 다시 이동하면서 버벅이는 소리만 나고 재생이 안 됐다.
+  const jumpToLoopStart = (reason) => {
+    console.log(`🔁 ${reason}: ${video.currentTime.toFixed(2)}s → ${loopStart.toFixed(2)}s`);
+    lastLoopJumpAt = Date.now();
+    video.currentTime = loopStart;
+  };
+  const inJumpCooldown = () => Date.now() - lastLoopJumpAt < LOOP_JUMP_COOLDOWN_MS;
+
   videoTimeupdateHandler = () => {
-    if (!isLooping || video.paused || video.seeking) return;
+    if (!isLooping || video.paused || video.seeking || inJumpCooldown()) return;
     
     const currentTime = video.currentTime;
     
     if (currentTime >= loopEnd) {
-      console.log(`🔁 선제 점프: ${currentTime.toFixed(1)}s → ${loopStart.toFixed(1)}s`);
-      video.currentTime = loopStart;
-    } else if (currentTime < loopStart) {
-      console.log(`⏮️ 범위 이탈 복귀: ${currentTime.toFixed(1)}s → ${loopStart.toFixed(1)}s`);
-      video.currentTime = loopStart;
+      jumpToLoopStart('끝점 도달');
+    } else if (currentTime < loopStart - LOOP_START_TOLERANCE) {
+      jumpToLoopStart('범위 이탈 복귀');
     }
   };
   video.addEventListener('timeupdate', videoTimeupdateHandler);
 
   // 3. 백업 인터벌 (timeupdate는 약 250ms 간격이라 30ms로 정확하게 B를 잡는다)
   loopInterval = setInterval(() => {
-    if (!video || video.paused || !isLooping || video.seeking) return;
+    if (!video || video.paused || !isLooping || video.seeking || inJumpCooldown()) return;
     
     const currentTime = video.currentTime;
     
     // 끝점 도달 또는 영상 끝 근처 (YouTube 자동재생 방지)
     if (currentTime >= loopEnd || currentTime >= video.duration - 1) {
-      video.currentTime = loopStart;
+      jumpToLoopStart('끝점 도달');
     }
   }, 30);
 

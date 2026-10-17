@@ -256,6 +256,37 @@ describe('구간 반복 — 영상 쪽 (LOOPC)', () => {
   });
 });
 
+describe('구간 반복 — 이동 정밀도 (LOOPC)', () => {
+  it('LOOPC-08 (80% 속도) A가 소수점 시간이고 이동 결과가 A보다 아주 조금 앞이어도 다시 이동하지 않는다', async () => {
+    await loadContentScript();
+    await send({ action: 'setPlaybackRate', speed: 0.8 });
+    // 브라우저는 위치를 마이크로초 단위로 저장해서, 70.123456789로 이동하면 70.123456이 된다
+    const seeks = [];
+    let t = 50;
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get: () => t,
+      set: (v) => { seeks.push(v); t = Math.floor(v * 1e6) / 1e6; },
+    });
+    await send({ action: 'setLoop', start: 70.123456789, end: 95, enabled: true });
+    t = 95; // B 도달
+    vi.advanceTimersByTime(30);
+    expect(seeks.length).toBe(1);
+    // 이동 직후 timeupdate와 30ms 체크가 여러 번 돌아도 다시 이동하지 않아야 한다
+    for (let i = 0; i < 10; i++) {
+      video.dispatchEvent(new Event('timeupdate'));
+      vi.advanceTimersByTime(30);
+    }
+    expect(seeks.length).toBe(1);
+    expect(video.playbackRate).toBe(0.8);
+    // 다음 바퀴: 재생이 이어져 B에 다시 도달하면 정상적으로 한 번 더 점프한다
+    vi.advanceTimersByTime(400);
+    t = 95;
+    vi.advanceTimersByTime(30);
+    expect(seeks.length).toBe(2);
+  });
+});
+
 describe('구간 반복 + 속도 (LOOPC)', () => {
   it('LOOPC-06 구간 반복을 지정하고 반복이 돌아도 재생 속도와 반복이 유지된다', async () => {
     await loadContentScript();
@@ -388,6 +419,28 @@ describe('설정 독립성 — 영상 쪽 (IND)', () => {
     video.playbackRate = 1; // 플레이어가 임의로 1.0x로 바꿈
     video.dispatchEvent(new Event('ratechange'));
     expect(video.playbackRate).toBe(1.5);
+  });
+
+  it('IND-08 플레이어가 속도를 계속 되돌려도 서로 무한히 다투지 않는다', async () => {
+    await loadContentScript();
+    await send({ action: 'setPlaybackRate', speed: 1.5 });
+    // 플레이어가 속도가 바뀔 때마다 즉시 1.0으로 되돌리는 최악의 경우
+    let rate = 1.5;
+    let writes = 0;
+    Object.defineProperty(video, 'playbackRate', {
+      configurable: true,
+      get: () => rate,
+      set: (v) => {
+        writes += 1;
+        if (writes > 200) throw new Error('무한 반복');
+        rate = v;
+        video.dispatchEvent(new Event('ratechange'));
+        if (rate !== 1) { rate = 1; video.dispatchEvent(new Event('ratechange')); }
+      },
+    });
+    rate = 1;
+    video.dispatchEvent(new Event('ratechange'));
+    expect(writes).toBeLessThanOrEqual(5);
   });
 
   it('IND-07 다른 영상으로 넘어가 초기화된 뒤에는 이전 속도를 강제하지 않는다', async () => {
