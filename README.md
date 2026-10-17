@@ -1,4 +1,4 @@
-# Video Controller Chrome Extension (v4.2.0)
+# Video Controller Chrome Extension (v4.4.0)
 
 유튜브 및 웹 비디오용 고급 컨트롤러 크롬 익스텐션입니다.
 
