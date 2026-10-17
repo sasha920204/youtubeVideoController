@@ -1,122 +1,115 @@
 ===== Short Description (Max 132 characters) =====
 
-Control YouTube video speed, pitch, and loop sections. Enhanced loop protection prevents auto-play skipping for perfect practice.
+Speed, pitch and A-B loop for YouTube. Set each one and it stays put. Keyboard shortcuts included. Built for practice.
 
 
 ===== Detailed Description =====
 
-🎵 Video Controller - Advanced YouTube Video Controller
+🎵 Video Controller - Speed, Pitch & A-B Loop for YouTube
 
-The ultimate YouTube controller for music practice, language learning, and lecture viewing!
+Slow it down, change the key, and loop the hard part.
+Made for music practice, language learning and lectures.
+
+
+🆕 What's New in v4.4.0
+
+✅ Speed, pitch and loop are fully independent: change one and the other two stay exactly as set
+✅ Loops play smoothly: no more stuttering or getting stuck when you turn a loop on
+✅ Clean pitch shifting: no more crackling noise when raising the pitch
+✅ "Now" buttons: set loop points A and B at the current playback position
+✅ Keyboard shortcuts: change speed and set A/B without opening the popup
+✅ Everything fits on one screen: no more scrolling in the popup
+✅ The popup connects instantly and shows your current settings when reopened
+✅ Seeking within a video no longer resets your settings
 
 
 ✨ Key Features
 
-🎛️ Global Master ON/OFF Switch
-• Control all features with one click
-• Instantly restore to original state if issues occur
-• ON/OFF state is automatically saved
+🚀 Playback Speed
+• 0.25x to 4.0x
+• −0.2 / −0.1 / +0.1 / +0.2 buttons for fine control
+• Presets: 60%, 70%, 80%, 90%, 110%, 120%
+• Click the current speed to reset to 1.0x
+• Your speed holds even if the YouTube player tries to change it
 
 
-🚀 Precise Playback Speed Control
-• Fine-tune in 0.1x increments (0.25x ~ 4.0x)
-• Preset buttons: 50%, 60%, 70%, 80%, 90%, 100%, 110%, 125%, 150%, 175%, 200%
-• Quick adjustment with +/- buttons
-• Individual ON/OFF for speed control
+🎵 Pitch (Key)
+• Shift up or down by semitones, from −24 to +24 (two octaves)
+• −2 / −1 / +1 / +2 semitone buttons, plus whole-tone presets (−2T, −1T, +1T, +2T)
+• Changes the key without changing the speed
+• Click the current pitch to return to the original key
 
 
-🎵 Pitch (Key) Control
-• Adjust pitch in semitone units (-24 ~ +24 semitones, 2 octaves)
-• Perfect for music practice: Match song key to your vocal range
-• Instrument practice: Adjust original key to match your instrument
-• Display current note name (C, C#, D, D#, E, F, F#, G, G#, A, A#, B)
-• Enhanced performance using AudioWorkletNode technology
+🔁 A-B Loop
+• Press "Now" to set A or B at the current position (setting B starts the loop)
+• Or type a time ("1:30" or "90"), or drag the handles on the slider
+• Plays all the way to B, then jumps back to A
+• Never skips to the next video, even in autoplay playlists
+• Yellow marker shows the current playback position
 
 
-🔄 Perfect Loop/Repeat
-• Never skips to next video (enhanced protection system)
-• Repeat single video even in autoplay playlists
-• Set section with slider or direct time input ("1:30" or "90")
-• Current playback position indicator (yellow)
-• Jump to start/end point instantly
+⌨️ Keyboard Shortcuts
+• Speed up / down: Alt(⌥) + Shift + . / ,
+• Set loop A: Alt(⌥) + Shift + A
+• Set loop B and start looping: Alt(⌥) + Shift + B
+• Pitch up/down and loop on/off can be assigned in chrome://extensions/shortcuts
+• A small on-screen message confirms each change, even in fullscreen
 
 
-🔄 Smart Track Change Detection & Auto Reset
-• Detects track changes using 5 methods (title, URL, time jump, end→start, end event)
-• Automatically resets to default when track changes
-• Start fresh with clean state for each new track
-• Fast detection every 2 seconds
+🎛️ Master ON/OFF Switch
+• Turn every feature off at once to hear the original video
+• Turn it back on to restore your settings
+• The ON/OFF state is remembered
+
+
+🔄 Automatic Reset on New Videos
+• When you move to a different video, settings return to defaults
+• Seeking, looping or rewinding within the same video keeps your settings
 
 
 💡 Use Cases
 
 🎸 Music Practice
-• Loop difficult sections for focused practice
-• Lower pitch to sing comfortably
-• Slow down speed to learn fast passages
+• Loop a difficult passage with A-B and slow it down
+• Move the key to fit your voice or instrument
 
 📚 Language Learning
-• Repeat listening sections for accurate pronunciation
-• Adjust speed for beginners to follow easily
-• Repeat important phrases for learning
+• Repeat a sentence until you catch every word
+• Slow down fast speakers
 
-🎓 Lectures/Education
-• Repeat important concept sections
-• Slow down fast lectures, speed up slow ones
-• Section learning for perfect understanding
-
-
-🛡️ v4.2.0 Bug Fixes & Improvements
-
-✅ Fixed bug where dragging loop end point skips to next track
-✅ Fixed slider UI exceeding screen bounds
-✅ Enhanced loop protection (0.3s → 0.5s pre-emptive, 50ms → 30ms interval)
-✅ Migrated to AudioWorkletNode (removed Deprecated warning)
-✅ Improved track change detection (5s → 2s interval)
-✅ Removed per-song state saving (always starts with defaults)
-✅ Improved global ON/OFF toggle UI
-✅ Code cleanup and optimization (3KB reduction)
-
-
-🎯 Perfect Compatibility
-
-• Full YouTube support
-• Chrome Extension Manifest V3
-• Modern UI built with React 18
-• Latest Web Audio API technology
+🎓 Lectures
+• Replay the key part of an explanation
+• Speed through slower sections
 
 
 📖 How to Use
 
 1. Play a YouTube video
-2. Click the extension icon in the top-right corner
-3. Use desired features in the popup:
-   - Speed: Click +/- buttons or presets
-   - Pitch: Adjust with semitone/tone/octave buttons
-   - Loop: Set section with slider or time input → Start loop
+2. Click the extension icon
+3. Adjust speed, pitch and loop in the popup, or use the keyboard shortcuts
 
 
-⚠️ Important Notes
+⚠️ Notes
 
-• Only works on YouTube
+• Works on YouTube only
 • Some DRM-protected content may not be supported
-• When pitch control is active, original video is muted and converted audio plays
+• While pitch control is active, the video's own audio is muted and the pitch-shifted audio plays instead
+• After updating the extension, refresh your YouTube tab once
 
 
 🔒 Privacy
 
-• No user data collection
-• All settings stored locally only
-• No internet connection required (except YouTube)
+• No user data is collected
+• Only the master ON/OFF setting is saved, and only on your device
+• Nothing is sent anywhere
 
 
 💬 Feedback & Support
 
-If you encounter issues or have suggestions, please submit an issue on our GitHub repository.
-Your feedback helps us build a better extension!
+Found a bug or have an idea? Please open an issue on GitHub.
 
 
-🎓 Open Source Project
+🎓 Open Source
 
 GitHub: https://github.com/sasha920204/youtubeVideoController
 MIT License
@@ -124,5 +117,4 @@ MIT License
 
 ---
 
-💪 Music practice, language learning, and lecture viewing made easier!
-Learn efficiently with Video Controller! 🎵
+💪 Practice smarter with Video Controller 🎵
