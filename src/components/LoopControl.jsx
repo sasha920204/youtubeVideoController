@@ -11,7 +11,8 @@ const LoopControl = ({
   onSeekToStart,
   onSeekToEnd,
   isEnabled,
-  onEnabledToggle
+  onEnabledToggle,
+  onSetPointNow
 }) => {
   const [isDragging, setIsDragging] = useState(null);
   const [startInput, setStartInput] = useState('');
@@ -41,15 +42,20 @@ const LoopControl = ({
     return newEnd;
   }, [loopStart, videoDuration]);
 
+  // 드래그 중에는 구간만 바꾸고 영상은 이동시키지 않는다.
+  // (예전에는 마우스가 움직일 때마다 영상을 이동시켜서 버퍼링이 쌓이고 재생이 버벅였다)
+  // 손을 떼면 마지막 위치로 한 번만 이동한다.
   const handleMouseDown = (type) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(type);
+    let last = null;
     
     const handleMove = (moveEvent) => {
       if (!sliderRef.current) return;
 
       const rect = sliderRef.current.getBoundingClientRect();
+      if (!rect.width) return;
       const percentage = Math.max(0, Math.min(100, 
         ((moveEvent.clientX - rect.left) / rect.width) * 100
       ));
@@ -57,18 +63,19 @@ const LoopControl = ({
 
       if (type === 'start') {
         const newStart = Math.min(time, loopEnd - 1);
-        onLoopChange(newStart, loopEnd, newStart);
+        last = { start: newStart, end: loopEnd, seek: newStart };
       } else {
         const newEnd = constrainEndPoint(time);
-        const seekPoint = Math.max(newEnd - 1, loopStart);
-        onLoopChange(loopStart, newEnd, seekPoint);
+        last = { start: loopStart, end: newEnd, seek: Math.max(newEnd - 1, loopStart) };
       }
+      onLoopChange(last.start, last.end);
     };
 
     const handleUp = () => {
       setIsDragging(null);
       document.removeEventListener('mousemove', handleMove);
       document.removeEventListener('mouseup', handleUp);
+      if (last) onLoopChange(last.start, last.end, last.seek);
     };
 
     document.addEventListener('mousemove', handleMove);
@@ -154,104 +161,60 @@ const LoopControl = ({
       </div>
       
       <div className="loop-controls">
+        {/* A/B 지점: 직접 입력하거나 "Now"로 현재 재생 위치를 지정 */}
+        <div className="loop-points">
+          <div className="loop-point">
+            <span className="loop-point-label a">A</span>
+            <input
+              type="text"
+              className="loop-point-input"
+              placeholder={formatTime(loopStart)}
+              value={startInput}
+              onChange={handleInputChange('start')}
+              onKeyPress={handleInputKeyPress('start')}
+              onBlur={handleInputSubmit('start')}
+              title="Set start time (MM:SS or SS)"
+            />
+            <button
+              className="control-button now-button"
+              onClick={() => onSetPointNow('start')}
+              title="Set start (A) to current position"
+            >
+              Now
+            </button>
+          </div>
 
-        {/* 시간 입력창 */}
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginBottom: '20px' }}>
-          <input
-            type="text"
-            className="control-button"
-            placeholder={formatTime(loopStart)}
-            value={startInput}
-            onChange={handleInputChange('start')}
-            onKeyPress={handleInputKeyPress('start')}
-            onBlur={handleInputSubmit('start')}
-            style={{
-              padding: '10px 14px',
-              fontSize: '14px',
-              fontWeight: '700',
-              minWidth: '80px',
-              textAlign: 'center',
-              background: 'rgba(0, 0, 0, 0.8)',
-              border: '2px solid rgba(255, 255, 255, 0.5)',
-              borderRadius: '8px',
-              color: '#ffffff',
-              outline: 'none'
-            }}
-            title="Set start time (MM:SS or SS)"
-          />
-          
-          <span style={{ color: '#888', fontSize: '16px', fontWeight: 'bold' }}>-</span>
-          
-          <input
-            type="text"
-            className="control-button"
-            placeholder={formatTime(loopEnd)}
-            value={endInput}
-            onChange={handleInputChange('end')}
-            onKeyPress={handleInputKeyPress('end')}
-            onBlur={handleInputSubmit('end')}
-            style={{
-              padding: '10px 14px',
-              fontSize: '14px',
-              fontWeight: '700',
-              minWidth: '80px',
-              textAlign: 'center',
-              background: 'rgba(0, 0, 0, 0.8)',
-              border: '2px solid rgba(255, 255, 255, 0.5)',
-              borderRadius: '8px',
-              color: '#ffffff',
-              outline: 'none'
-            }}
-            title="Set end time (MM:SS or SS)"
-          />
+          <span style={{ color: '#888', fontSize: '14px', fontWeight: 'bold' }}>–</span>
+
+          <div className="loop-point">
+            <span className="loop-point-label b">B</span>
+            <input
+              type="text"
+              className="loop-point-input"
+              placeholder={formatTime(loopEnd)}
+              value={endInput}
+              onChange={handleInputChange('end')}
+              onKeyPress={handleInputKeyPress('end')}
+              onBlur={handleInputSubmit('end')}
+              title="Set end time (MM:SS or SS)"
+            />
+            <button
+              className="control-button now-button"
+              onClick={() => onSetPointNow('end')}
+              title="Set end (B) to current position and start loop"
+            >
+              Now
+            </button>
+          </div>
         </div>
 
-        <div className="slider-container">
-          {/* 시간 라벨 - 시작시간과 종료시간을 슬라이더 위치에 맞춰 표시 */}
-          <div style={{ 
-            position: 'relative',
-            height: '20px',
-            marginBottom: '15px',
-            fontSize: '12px',
-            color: '#c0c0c0',
-            fontWeight: '600'
-          }}>
-            <span style={{ 
-              position: 'absolute',
-              left: `${Math.max(0, Math.min(85, startPercentage))}%`,
-              transform: 'translateX(-50%)',
-              background: 'rgba(0,0,0,1)',
-              padding: '3px 8px',
-              borderRadius: '6px',
-              fontSize: '10px',
-              color: '#FF9800',
-              fontWeight: '700',
-              zIndex: 20
-            }}>
-              {formatTime(loopStart)}
-            </span>
-            <span style={{ 
-              position: 'absolute',
-              left: `${Math.max(15, Math.min(100, endPercentage))}%`,
-              transform: 'translateX(-50%)',
-              background: 'rgba(0,0,0,1)',
-              padding: '3px 8px',
-              borderRadius: '6px',
-              fontSize: '10px',
-              color: '#2196F3',
-              fontWeight: '700',
-              zIndex: 20
-            }}>
-              {formatTime(loopEnd)}
-            </span>
-          </div>
-          
+        <div className="slider-container" style={{ margin: '12px 0 0' }}>
           <div 
             ref={sliderRef}
             className="unified-slider-track"
             onClick={handleTrackClick}
             style={{
-              margin: '0 12px',
+              margin: '0 9px',
               position: 'relative'
             }}
           >
@@ -306,83 +269,49 @@ const LoopControl = ({
           <div className="slider-labels" style={{ 
             display: 'flex', 
             justifyContent: 'space-between',
-            marginTop: '8px',
+            marginTop: '6px',
             fontSize: '10px',
             color: '#888',
-            padding: '0 12px' // 슬라이더 트랙과 동일한 패딩
+            padding: '0 9px' // 슬라이더 트랙과 동일한 패딩
           }}>
             <span>0:00</span>
             <span>{formatTime(videoDuration)}</span>
           </div>
         </div>
 
-        <div className="loop-actions" style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '20px' }}>
-          {/* 루프 토글 버튼 */}
+        <div className="loop-actions">
           <button
-            className={`control-button ${isLooping ? 'active' : ''}`}
+            className={`control-button loop-action-button ${isLooping ? 'looping' : ''}`}
             onClick={onLoopToggle}
             title={isLooping ? 'Stop Loop' : 'Start Loop'}
-            style={{
-              padding: '12px',
-              fontSize: '15px',
-              fontWeight: '700',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '48px',
-              minHeight: '48px',
-              background: isLooping ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 255, 255, 0.1)',
-              border: isLooping ? '2px solid #4caf50' : '2px solid rgba(255, 255, 255, 0.2)',
-              color: isLooping ? '#4caf50' : '#fff'
-            }}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               {isLooping ? (
                 <path d="M6 6h12v12H6z"/>
               ) : (
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+                <path d="M8 5v14l11-7z"/>
               )}
             </svg>
+            {isLooping ? 'Stop' : 'Loop'}
           </button>
 
           <button
-            className="control-button"
+            className="control-button loop-action-button"
             onClick={onSeekToStart}
             title="Jump to start point"
-            style={{
-              padding: '12px',
-              fontSize: '14px',
-              fontWeight: '600',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '48px',
-              minHeight: '48px'
-            }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
             </svg>
+            To A
           </button>
           
           <button
-            className="control-button"
+            className="control-button loop-action-button"
             onClick={() => onLoopChange(0, videoDuration)}
             title="Reset loop to full video"
-            style={{
-              padding: '12px',
-              fontSize: '14px',
-              fontWeight: '600',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '48px',
-              minHeight: '48px'
-            }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-            </svg>
+            Full
           </button>
         </div>
       </div>

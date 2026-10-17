@@ -85,7 +85,7 @@ input:-ms-input-placeholder {
 .app {
   background: radial-gradient(ellipse at center, #1a1a1a 0%, #0d0d0d 100%);
   min-height: 100vh;
-  padding: 16px;
+  padding: 8px;
   color: white;
   font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   overflow-x: hidden;
@@ -94,14 +94,14 @@ input:-ms-input-placeholder {
 .video-controller {
   background: linear-gradient(145deg, #1c1c1e, #2c2c2e);
   border: 1px solid #3a3a3c;
-  border-radius: 20px;
-  padding: 24px;
+  border-radius: 16px;
+  padding: 12px;
   box-shadow: 
     0 10px 30px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 rgba(255, 255, 255, 0.1);
   position: relative;
   max-width: 400px;
-  margin: 0 auto 80px auto; /* Add bottom margin for sticky control */
+  margin: 0 auto 82px auto; /* 하단 고정 플레이어(74px)에 가리지 않도록 */
 }
 
 .video-controller::before {
@@ -134,9 +134,9 @@ input:-ms-input-placeholder {
 .control-section {
   background: linear-gradient(145deg, #2a2a2c, #1a1a1c);
   border: 1px solid #3a3a3c;
-  border-radius: 16px;
-  margin: 16px 0;
-  padding: 20px;
+  border-radius: 12px;
+  margin: 8px 0;
+  padding: 10px 12px;
   position: relative;
   box-shadow: 
     0 4px 16px rgba(0, 0, 0, 0.3),
@@ -180,9 +180,7 @@ input:-ms-input-placeholder {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  margin-bottom: 8px;
 }
 
 .section-title {
@@ -200,11 +198,11 @@ input:-ms-input-placeholder {
 /* Modern Toggle Switch */
 .toggle-switch {
   position: relative;
-  width: 52px;
-  height: 28px;
+  width: 40px;
+  height: 22px;
   background: linear-gradient(145deg, #2c2c2e, #1c1c1e);
   border: 1px solid #3a3a3c;
-  border-radius: 14px;
+  border-radius: 11px;
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -230,8 +228,8 @@ input:-ms-input-placeholder {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 22px;
-  height: 22px;
+  width: 16px;
+  height: 16px;
   background: linear-gradient(145deg, #ffffff, #f0f0f0);
   border-radius: 50%;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -239,7 +237,7 @@ input:-ms-input-placeholder {
 }
 
 .toggle-switch.enabled .toggle-switch-thumb {
-  transform: translateX(24px);
+  transform: translateX(18px);
   background: linear-gradient(145deg, #ffffff, #e8f5e8);
 }
 
@@ -438,18 +436,173 @@ input:-ms-input-placeholder {
 
 /* Responsive Design */
 @media (max-width: 480px) {
-  .video-controller {
-    margin: 0 8px;
-    padding: 16px;
-  }
-  
-  .control-section {
-    padding: 16px;
-  }
-  
   .controller-title {
-    font-size: 18px;
+    font-size: 16px;
   }
+}
+
+/* 한 줄 스테퍼: [−큰 단위][−작은 단위][현재 값 · 누르면 리셋][+작은 단위][+큰 단위] */
+.stepper-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.step-button {
+  flex: 0 0 48px;
+  height: 36px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.control-button.step-button.decrease {
+  background: rgba(244, 67, 54, 0.18);
+  border-color: rgba(244, 67, 54, 0.45);
+  color: #ff8a80;
+}
+
+.control-button.step-button.increase {
+  background: rgba(76, 175, 80, 0.18);
+  border-color: rgba(76, 175, 80, 0.45);
+  color: #a5d6a7;
+}
+
+.value-button {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.value-button .reset-hint {
+  font-size: 12px;
+  color: #8a8a8e;
+}
+
+.value-button:hover .reset-hint {
+  color: #ffffff;
+}
+
+.preset-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.preset-button {
+  flex: 1 1 0;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 구간 반복: A/B 지점 입력 + 지금 위치로 지정 */
+.loop-points {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.loop-point {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.loop-point-label {
+  font-size: 12px;
+  font-weight: 800;
+  width: 12px;
+  text-align: center;
+}
+
+.loop-point-label.a { color: #FF9800; }
+.loop-point-label.b { color: #2196F3; }
+
+.loop-point-input {
+  width: 62px;
+  height: 30px;
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 8px;
+  color: #ffffff;
+  outline: none;
+  cursor: text;
+}
+
+.loop-point-input:focus {
+  border-color: #ffffff;
+}
+
+.now-button {
+  height: 30px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.loop-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.loop-action-button {
+  flex: 1 1 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.loop-action-button.looping {
+  background: rgba(76, 175, 80, 0.2);
+  border-color: #4caf50;
+  color: #81c784;
+}
+
+.header-icon-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #8a8a8e;
+}
+
+.header-icon-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.notice-button {
+  margin-top: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 /* Loading Animation */

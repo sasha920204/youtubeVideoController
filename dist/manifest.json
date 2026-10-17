@@ -16,8 +16,13 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://*.youtube.com/*", "https://youtube.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://*.youtube.com/*",
+        "https://youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     }
@@ -41,7 +46,52 @@
         "*.css",
         "pitch-shifter.worklet.js"
       ],
-      "matches": ["https://*.youtube.com/*", "https://youtube.com/*"]
+      "matches": [
+        "https://*.youtube.com/*",
+        "https://youtube.com/*"
+      ]
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "commands": {
+    "speed-up": {
+      "suggested_key": {
+        "default": "Alt+Shift+Period",
+        "mac": "Alt+Shift+Period"
+      },
+      "description": "재생 속도 +0.1x / Speed up"
+    },
+    "speed-down": {
+      "suggested_key": {
+        "default": "Alt+Shift+Comma",
+        "mac": "Alt+Shift+Comma"
+      },
+      "description": "재생 속도 -0.1x / Speed down"
+    },
+    "loop-a": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      },
+      "description": "현재 위치를 반복 시작점(A)으로 / Set loop A"
+    },
+    "loop-b": {
+      "suggested_key": {
+        "default": "Alt+Shift+B",
+        "mac": "Alt+Shift+B"
+      },
+      "description": "현재 위치를 반복 끝점(B)으로 하고 반복 시작 / Set loop B"
+    },
+    "pitch-up": {
+      "description": "피치 +1 반음 / Pitch up"
+    },
+    "pitch-down": {
+      "description": "피치 -1 반음 / Pitch down"
+    },
+    "loop-toggle": {
+      "description": "구간 반복 켜기/끄기 / Toggle loop"
+    }
+  }
 }

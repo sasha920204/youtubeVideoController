@@ -1,41 +1,61 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { sendToActiveTab, getActiveTab } from '../tabMessaging';
+
+const INIT_RETRY_MS = 1000;
+const INIT_MAX_TRIES = 10;
 
 const PitchControl = ({ currentPitch, onPitchChange, isEnabled, onToggle }) => {
   const [isPitchReady, setIsPitchReady] = useState(false);
+  // 'pending' | 'needsReload' | 'failed'
+  const [initStatus, setInitStatus] = useState('pending');
   
-  // 피치 변경 시 메시지 전송 (실제 처리는 비활성화됨)
+  // 피치 오디오 체인 준비만 한다.
+  // setPitch는 사용자가 값을 바꿀 때 VideoController에서 보낸다.
+  // (예전에는 팝업을 열 때마다 setPitch를 보내서 재생 속도와 피치가 초기화됐다)
+  // 준비가 안 되면 몇 번 다시 시도하고, 새로고침이 필요한 경우엔 바로 안내한다.
   useEffect(() => {
+    if (!isEnabled || isPitchReady) return undefined;
+    let cancelled = false;
+    let timer = null;
+    let tries = 0;
+
     const init = async () => {
-      if (!isEnabled || isPitchReady) return;
+      tries += 1;
+      let res;
       try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        const res = await chrome.tabs.sendMessage(tab.id, { action: 'initializePitch' });
-        if (res && res.success) {
-          setIsPitchReady(true);
-        }
+        res = await sendToActiveTab({ action: 'initializePitch' });
       } catch (e) {
         console.error('🎵 initializePitch failed', e);
       }
+      if (cancelled) return;
+      if (res && res.success) {
+        setIsPitchReady(true);
+        return;
+      }
+      if (res && res.reason === 'needsReload') {
+        setInitStatus('needsReload');
+        return;
+      }
+      if (tries >= INIT_MAX_TRIES) {
+        setInitStatus('failed');
+        return;
+      }
+      timer = setTimeout(init, INIT_RETRY_MS);
     };
+
+    setInitStatus('pending');
     init();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [isEnabled, isPitchReady]);
 
-  useEffect(() => {
-    if (!isPitchReady || !isEnabled) return;
-    const send = async () => {
-      try {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        // 전체 범위 허용 - 여기서 반전시켜서 전송
-        const clamped = Math.max(-24, Math.min(24, currentPitch));
-        const transmitPitch = -clamped; // 실제 전송할 때 반전
-        console.log(`🎵 Sending pitch: display=${clamped}, transmit=${transmitPitch}`);
-        await chrome.tabs.sendMessage(tab.id, { action: 'setPitch', pitch: transmitPitch });
-      } catch (e) {
-        console.error('🎵 setPitch failed', e);
-      }
-    };
-    send();
-  }, [currentPitch, isEnabled, isPitchReady]);
+  const reloadTab = async () => {
+    const tab = await getActiveTab();
+    if (tab) await chrome.tabs.reload(tab.id);
+  };
+
   const adjustPitch = (semitones) => {
     if (!isEnabled || !isPitchReady) return;
     // UI 표시는 정상적으로
@@ -81,6 +101,23 @@ const PitchControl = ({ currentPitch, onPitchChange, isEnabled, onToggle }) => {
 
 
 
+  const steps = [
+    { label: '−2', title: 'Down 2 semitones', delta: -2, kind: 'decrease' },
+    { label: '−1', title: 'Down 1 semitone', delta: -1, kind: 'decrease' },
+    null, // 현재 값 자리
+    { label: '+1', title: 'Up 1 semitone', delta: 1, kind: 'increase' },
+    { label: '+2', title: 'Up 2 semitones', delta: 2, kind: 'increase' },
+  ];
+
+  const presets = [
+    { label: '-2T', title: 'Down 2 tones', value: -4 },
+    { label: '-1T', title: 'Down 1 tone', value: -2 },
+    { label: '+1T', title: 'Up 1 tone', value: 2 },
+    { label: '+2T', title: 'Up 2 tones', value: 4 },
+  ];
+
+  const isLocked = !isPitchReady;
+
   return (
     <div className={`control-section ${!isEnabled ? 'disabled' : ''}`}>
       <div className="section-header">
@@ -108,196 +145,68 @@ const PitchControl = ({ currentPitch, onPitchChange, isEnabled, onToggle }) => {
           background: 'rgba(255, 152, 0, 0.1)',
           border: '1px solid rgba(255, 152, 0, 0.3)',
           borderRadius: '8px',
-          padding: '12px',
-          margin: '12px 0',
+          padding: '8px',
+          marginBottom: '8px',
           textAlign: 'center',
           color: '#ff9800',
-          fontSize: '14px',
+          fontSize: '12px',
           fontWeight: '500'
         }}>
-          <div>Initializing pitch engine...</div>
+          {initStatus === 'needsReload' ? (
+            <>
+              <div>피치를 쓰려면 유튜브 탭을 새로고침해 주세요</div>
+              <button className="control-button notice-button" onClick={reloadTab}>
+                새로고침
+              </button>
+            </>
+          ) : initStatus === 'failed' ? (
+            <div>피치 엔진을 시작하지 못했어요. 영상을 재생한 뒤 팝업을 다시 열어 주세요</div>
+          ) : (
+            <div>Initializing pitch engine...</div>
+          )}
         </div>
       )}
       
-      <div className="pitch-controls">
-        <div className="current-value" style={{ textAlign: 'center', marginBottom: '16px' }}>
-          <div>{formatPitch(currentPitch)}</div>
+      <div className="pitch-controls" style={{ opacity: isLocked ? 0.5 : 1 }}>
+        <div className="stepper-row">
+          {steps.map((step) =>
+            step ? (
+              <button
+                key={step.title}
+                className={`control-button step-button ${step.kind}`}
+                onClick={() => adjustPitch(step.delta)}
+                title={step.title}
+                disabled={isLocked}
+              >
+                {step.label}
+              </button>
+            ) : (
+              <button
+                key="value"
+                className={`current-value value-button ${currentPitch === 0 ? 'active' : ''}`}
+                onClick={() => handlePitchChange(0)}
+                title="Reset to original pitch"
+                disabled={isLocked}
+              >
+                <span>{formatPitch(currentPitch)}</span>
+                {currentPitch !== 0 && <span className="reset-hint">↺</span>}
+              </button>
+            )
+          )}
         </div>
 
-        {/* Professional Pitch Control */}
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', marginBottom: '20px' }}>
-          <button
-            className="control-button decrease"
-            onClick={() => adjustPitch(-2)}
-            title="Down 2 semitones"
-            style={{
-              padding: '10px 18px',
-              fontSize: '16px',
-              fontWeight: '700',
-              minWidth: '48px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(244, 67, 54, 0.2)',
-              border: '1px solid rgba(244, 67, 54, 0.3)',
-              color: '#f44336'
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 13H5v-2h14v2z"/>
-            </svg>
-          </button>
-          
-          <button
-            className="control-button decrease"
-            onClick={() => adjustPitch(-1)}
-            title="Down 1 semitone"
-            style={{
-              padding: '10px 18px',
-              fontSize: '16px',
-              fontWeight: '700',
-              minWidth: '48px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(244, 67, 54, 0.2)',
-              border: '1px solid rgba(244, 67, 54, 0.3)',
-              color: '#f44336'
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 13H5v-2h14v2z"/>
-            </svg>
-          </button>
-          
-          <button
-            className={`control-button reset ${currentPitch === 0 ? 'active' : ''}`}
-            onClick={() => handlePitchChange(0)}
-            title="Reset to original pitch"
-            style={{
-              padding: '10px 18px',
-              fontSize: '18px',
-              minWidth: '52px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-            </svg>
-          </button>
-          
-          <button
-            className="control-button increase"
-            onClick={() => adjustPitch(1)}
-            title="Up 1 semitone"
-            style={{
-              padding: '10px 18px',
-              fontSize: '16px',
-              fontWeight: '700',
-              minWidth: '48px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(76, 175, 80, 0.2)',
-              border: '1px solid rgba(76, 175, 80, 0.3)',
-              color: '#4caf50'
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-            </svg>
-          </button>
-          
-          <button
-            className="control-button increase"
-            onClick={() => adjustPitch(2)}
-            title="Up 2 semitones"
-            style={{
-              padding: '10px 18px',
-              fontSize: '16px',
-              fontWeight: '700',
-              minWidth: '48px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'rgba(76, 175, 80, 0.2)',
-              border: '1px solid rgba(76, 175, 80, 0.3)',
-              color: '#4caf50'
-            }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-            </svg>
-          </button>
-        </div>
-
-        {/* Quick Tone Controls */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '4px' }}>
-          <button
-            className={`control-button ${currentPitch === -4 ? 'active' : ''}`}
-            onClick={() => handlePitchChange(-4)}
-            title="Down 2 tones"
-            style={{
-              padding: '8px 10px',
-              fontSize: '10px',
-              fontWeight: '600',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              minWidth: '36px'
-            }}
-          >
-            -2T
-          </button>
-          
-          <button
-            className={`control-button ${currentPitch === -2 ? 'active' : ''}`}
-            onClick={() => handlePitchChange(-2)}
-            title="Down 1 tone"
-            style={{
-              padding: '8px 10px',
-              fontSize: '10px',
-              fontWeight: '600',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              minWidth: '36px'
-            }}
-          >
-            -1T
-          </button>
-          
-          <button
-            className={`control-button ${currentPitch === 2 ? 'active' : ''}`}
-            onClick={() => handlePitchChange(2)}
-            title="Up 1 tone"
-            style={{
-              padding: '8px 10px',
-              fontSize: '10px',
-              fontWeight: '600',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              minWidth: '36px'
-            }}
-          >
-            +1T
-          </button>
-          
-          <button
-            className={`control-button ${currentPitch === 4 ? 'active' : ''}`}
-            onClick={() => handlePitchChange(4)}
-            title="Up 2 tones"
-            style={{
-              padding: '8px 10px',
-              fontSize: '10px',
-              fontWeight: '600',
-              textTransform: 'uppercase',
-              letterSpacing: '0.5px',
-              minWidth: '36px'
-            }}
-          >
-            +2T
-          </button>
+        <div className="preset-row">
+          {presets.map((preset) => (
+            <button
+              key={preset.title}
+              className={`control-button preset-button ${currentPitch === preset.value ? 'active' : ''}`}
+              onClick={() => handlePitchChange(preset.value)}
+              title={preset.title}
+              disabled={isLocked}
+            >
+              {preset.label}
+            </button>
+          ))}
         </div>
       </div>
     </div>

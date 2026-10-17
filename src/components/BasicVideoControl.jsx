@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { TOP_FRAME } from '../tabMessaging';
 
 const BasicVideoControl = ({ 
   isConnected, 
@@ -33,7 +34,7 @@ const BasicVideoControl = ({
     const requestVideoState = () => {
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'getVideoState' }, (response) => {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'getVideoState' }, TOP_FRAME, (response) => {
             if (response && response.success) {
               setIsPlaying(response.isPlaying);
               // 신뢰 가능한 게인 노드를 소스 오브 트루스로 사용
@@ -69,7 +70,7 @@ const BasicVideoControl = ({
       if (tabs[0]) {
         chrome.tabs.sendMessage(tabs[0].id, { 
           action: 'togglePlayPause'
-        });
+        }, TOP_FRAME);
       }
     });
   }, [isConnected]);
@@ -83,7 +84,7 @@ const BasicVideoControl = ({
         chrome.tabs.sendMessage(tabs[0].id, { 
           action: 'setVolume',
           volume: newVolume
-        });
+        }, TOP_FRAME);
       }
     });
   }, [isConnected]);
@@ -142,7 +143,7 @@ const BasicVideoControl = ({
         chrome.tabs.sendMessage(tabs[0].id, { 
           action: 'seekTo',
           time: currentTime
-        });
+        }, TOP_FRAME);
       }
     });
   }, [isDragging, currentTime]);

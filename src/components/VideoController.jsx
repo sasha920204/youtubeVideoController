@@ -3,9 +3,16 @@ import BasicVideoControl from "./BasicVideoControl";
 import SpeedControl from "./SpeedControl";
 import LoopControl from "./LoopControl";
 import PitchControl from "./PitchControl";
+import {
+  getActiveTab,
+  sendToActiveTab,
+  isMissingReceiverError,
+  injectContentScript,
+} from "../tabMessaging";
 
 const VideoController = () => {
-  const [isConnected, setIsConnected] = useState(false);
+  // null: 연결 확인 중, true: 연결됨, false: 연결 실패
+  const [isConnected, setIsConnected] = useState(null);
   const [currentSpeed, setCurrentSpeed] = useState(1.0);
   const [videoDuration, setVideoDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,10 +38,15 @@ const VideoController = () => {
   // 초기 loopEnd 설정이 완료되었는지 추적
   const [isInitialLoopEndSet, setIsInitialLoopEndSet] = useState(false);
 
+  // content script 상태(현재 속도 등)를 한 번 가져왔는지, 주입을 시도했는지 추적
+  const hasSyncedRef = useRef(false);
+  const hasTriedInjectRef = useRef(false);
+  // 팝업이 열린 채로 다음 영상으로 넘어가면 content script가 설정을 초기화하므로 화면도 다시 맞춘다
+  const lastVideoKeyRef = useRef(null);
+
   const getCurrentSongKey = async () => {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const response = await chrome.tabs.sendMessage(tab.id, { action: 'getVideoInfo' });
+      const response = await sendToActiveTab({ action: 'getVideoInfo' });
       
       if (response && response.success && response.title) {
         const songKey = `${response.title}_${response.url || ''}`
@@ -85,8 +97,7 @@ const VideoController = () => {
 
   const syncWithContentScript = async () => {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      const response = await chrome.tabs.sendMessage(tab.id, { action: 'getVideoState' });
+      const response = await sendToActiveTab({ action: 'getVideoState' });
       
       if (response && response.success) {
         const { speed, pitch, loop } = response;
@@ -98,22 +109,19 @@ const VideoController = () => {
           if (loop.end !== undefined) setLoopEnd(loop.end);
           if (loop.enabled !== undefined) setIsLooping(loop.enabled);
         }
+        return response;
       }
     } catch (error) {
       console.log('Sync failed:', error);
     }
+    return null;
   };
 
   // 컴포넌트 마운트 시 상태 로드 및 동기화
   useEffect(() => {
-    const initializeState = async () => {
-      // 현재 곡 기준으로 storage에서 로드
-      await loadStateFromStorage();
-      // content script와 동기화
-      await syncWithContentScript();
-    };
-    
-    initializeState();
+    // storage에서 전역 설정 로드
+    // content script와의 동기화는 연결이 확인된 뒤 checkVideoConnection에서 한다
+    loadStateFromStorage();
   }, []);
 
   const applyRestoredSettings = async () => {
@@ -144,33 +152,59 @@ const VideoController = () => {
   // 비디오 상태 확인 및 연결
   useEffect(() => {
     const checkVideoConnection = async () => {
+      let tab;
       try {
-        const [tab] = await chrome.tabs.query({
-          active: true,
-          currentWindow: true,
-        });
-        if (tab && tab.url.includes("youtube.com")) {
-          const result = await chrome.tabs.sendMessage(tab.id, {
-            action: "getVideoInfo",
-          });
-          if (result && result.success) {
-            setIsConnected(true);
-            setVideoDuration(result.duration);
-            setCurrentTime(result.currentTime);
-            setVideoTitle(result.title || "Unknown Video");
-            
-            // loopEnd 초기화 또는 수정
-            if (!isInitialLoopEndSet && isStateLoaded && loopEnd === 0 && result.duration > 0) {
-              // 새 곡 - 비디오 길이로 설정
-              setLoopEnd(result.duration);
-              setIsInitialLoopEndSet(true);
-            } else if (loopEnd > result.duration && result.duration > 0) {
-              // loopEnd가 비디오 길이보다 크면 비디오 길이로 제한 (1초 마진)
-              setLoopEnd(Math.max(result.duration - 1, 1));
+        tab = await getActiveTab();
+        if (!tab || !tab.url || !tab.url.includes("youtube.com")) {
+          setIsConnected(false);
+          return;
+        }
+        const result = await sendToActiveTab({ action: "getVideoInfo" });
+        if (result && result.success) {
+          const videoKey = `${result.title}|${result.duration}`;
+          const videoChanged = lastVideoKeyRef.current !== null && lastVideoKeyRef.current !== videoKey;
+          lastVideoKeyRef.current = videoKey;
+          // 팝업을 열 때마다 기본값(1.0x 등)이 아니라 영상의 현재 상태를 보여준다
+          let syncedLoopEnd = null;
+          if ((!hasSyncedRef.current || videoChanged) && isStateLoaded) {
+            hasSyncedRef.current = true;
+            const synced = await syncWithContentScript();
+            if (synced && synced.loop && synced.loop.end > 0) {
+              syncedLoopEnd = synced.loop.end;
             }
           }
+          setIsConnected(true);
+          setVideoDuration(result.duration);
+          setCurrentTime(result.currentTime);
+          setVideoTitle(result.title || "Unknown Video");
+          
+          // loopEnd 초기화 또는 수정
+          if (syncedLoopEnd !== null) {
+            // 영상에 이미 반복 구간이 있으면 그 값을 그대로 보여준다 (영상 길이로 덮어쓰지 않음)
+            setIsInitialLoopEndSet(true);
+          } else if (!isInitialLoopEndSet && isStateLoaded && loopEnd === 0 && result.duration > 0) {
+            // 새 곡 - 비디오 길이로 설정
+            setLoopEnd(result.duration);
+            setIsInitialLoopEndSet(true);
+          } else if (loopEnd > result.duration && result.duration > 0) {
+            // loopEnd가 비디오 길이보다 크면 비디오 길이로 제한 (1초 마진)
+            setLoopEnd(Math.max(result.duration - 1, 1));
+          }
+        } else {
+          // 영상이 아직 없는 페이지(홈 등): 확인 중 상태에서만 실패로 바꾸고, 연결된 상태는 유지
+          setIsConnected((prev) => (prev === null ? false : prev));
         }
       } catch (error) {
+        // content script가 아직 없는 탭이면 한 번 주입하고 다음 체크에서 다시 확인
+        if (tab && isMissingReceiverError(error) && !hasTriedInjectRef.current) {
+          hasTriedInjectRef.current = true;
+          try {
+            await injectContentScript(tab.id);
+            return;
+          } catch (injectError) {
+            console.log("Content script inject failed:", injectError);
+          }
+        }
         console.log("Video connection failed:", error);
         setIsConnected(false);
       }
@@ -180,6 +214,18 @@ const VideoController = () => {
     const interval = setInterval(checkVideoConnection, 1000); // 더 자주 업데이트
     return () => clearInterval(interval);
   }, [isStateLoaded, isInitialLoopEndSet, loopEnd]);
+
+  // 팝업이 열린 상태에서 단축키로 설정이 바뀌면 content script가 알려준다
+  useEffect(() => {
+    if (!chrome.runtime || !chrome.runtime.onMessage) return undefined;
+    const listener = (message) => {
+      if (message && message.type === "videoStateChanged") {
+        syncWithContentScript();
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
 
   // 연결되고 상태가 로드되면 설정 적용
   useEffect(() => {
@@ -191,11 +237,7 @@ const VideoController = () => {
   // 메시지를 content script로 전송하는 헬퍼 함수
   const sendMessage = async (message) => {
     try {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      return await chrome.tabs.sendMessage(tab.id, message);
+      return await sendToActiveTab(message);
     } catch (error) {
       console.log("Message send failed:", error);
       return { success: false };
@@ -288,6 +330,40 @@ const VideoController = () => {
     }
   };
 
+  // A/B를 현재 재생 위치로 지정. B를 지정하면 바로 반복을 시작한다
+  // A가 기존 B보다 뒤면 B를 영상 끝으로, B가 A보다 앞이면 A를 처음으로 옮긴다
+  const handleSetPointNow = async (type) => {
+    if (!isGlobalEnabled || !isLoopEnabled) return;
+    const info = await sendMessage({ action: "getVideoInfo" });
+    if (!info || !info.success) return;
+    const now = info.currentTime || 0;
+    const duration = info.duration || videoDuration;
+    const lastEnd = Math.max(duration - 1, 1);
+
+    let start = loopStart;
+    let end = loopEnd;
+    let looping = isLooping;
+    if (type === "start") {
+      start = Math.max(0, Math.min(now, lastEnd - 1));
+      if (end <= start + 1) end = lastEnd;
+    } else {
+      end = Math.min(Math.max(now, 1), lastEnd);
+      if (start >= end - 1) start = 0;
+      looping = true;
+    }
+
+    setLoopStart(start);
+    setLoopEnd(end);
+    if (looping) {
+      setIsLooping(true);
+      await sendMessage({ action: "setLoop", start, end, enabled: true });
+    }
+  };
+
+  const openShortcutSettings = () => {
+    chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+  };
+
   const handleSeekToStart = async () => {
     if (!isGlobalEnabled) return;
     await sendMessage({ action: "seekTo", time: loopStart });
@@ -317,6 +393,8 @@ const VideoController = () => {
     if (!isGlobalEnabled || !isPitchEnabled) return;
     const clamped = Math.max(-24, Math.min(24, pitch));
     setCurrentPitch(clamped);
+    // 사용자가 값을 바꿀 때만 전송 (팝업을 열 때 자동으로 보내지 않음)
+    await sendMessage({ action: "setPitch", pitch: clamped });
   };
 
   const handlePitchToggle = async () => {
@@ -326,16 +404,17 @@ const VideoController = () => {
     if (!newState) {
       await sendMessage({ action: "disablePitch" });
     } else {
+      // 다시 켜면 화면에 보이는 피치로 되돌린다
       await sendMessage({ action: "initializePitch" });
+      if (currentPitch !== 0) {
+        await sendMessage({ action: "setPitch", pitch: currentPitch });
+      }
     }
   };
 
   const handleRefresh = async () => {
     try {
-      const [tab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
+      const tab = await getActiveTab();
       if (tab) {
         await chrome.tabs.reload(tab.id);
       }
@@ -381,12 +460,12 @@ const VideoController = () => {
   };
 
   return (
-    <div className="video-controller" style={{ marginBottom: '100px' }}>
+    <div className="video-controller">
       <div style={{ 
         display: 'flex', 
         alignItems: 'center', 
         justifyContent: 'space-between',
-        marginBottom: '20px'
+        marginBottom: '4px'
       }}>
         <h1 className="controller-title" style={{ margin: 0 }}>Video Controller</h1>
         {isConnected && (
@@ -422,30 +501,22 @@ const VideoController = () => {
               />
             </div>
             
+            {/* 단축키 설정 */}
+            <button
+              className="header-icon-button"
+              onClick={openShortcutSettings}
+              title="Keyboard shortcuts"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/>
+              </svg>
+            </button>
+
             {/* 리셋 버튼 */}
             <button
+              className="header-icon-button"
               onClick={handleResetAll}
               title="Reset all controls to original"
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: '4px',
-                borderRadius: '4px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#666',
-                transition: 'all 0.2s'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f0f0f0';
-                e.currentTarget.style.color = '#ff4444';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = 'transparent';
-                e.currentTarget.style.color = '#666';
-              }}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z"/>
@@ -466,7 +537,11 @@ const VideoController = () => {
         </div>
       )}
 
-      {isConnected ? (
+      {isConnected === null ? (
+        <div style={{ textAlign: 'center', padding: '20px', color: '#666', fontSize: '14px' }}>
+          ⏳ 영상에 연결하는 중...
+        </div>
+      ) : isConnected ? (
         <div style={{ 
           opacity: isGlobalEnabled ? 1 : 0.5,
           pointerEvents: isGlobalEnabled ? 'auto' : 'none',
@@ -495,6 +570,7 @@ const VideoController = () => {
             onPreviewLoop={handlePreviewLoop}
             isEnabled={isLoopEnabled}
             onEnabledToggle={handleLoopEnabledToggle}
+            onSetPointNow={handleSetPointNow}
           />
           <PitchControl
             currentPitch={currentPitch}

@@ -19,20 +19,28 @@ let mediaSourceNode = null; // MediaElementAudioSourceNode
 let pitchWorkletNode = null; // AudioWorkletNode for pitch shifting
 let outputGainNode = null;  // GainNode
 let isPitchInitialized = false;
+let pitchInitPromise = null; // 동시에 여러 번 호출돼도 초기화는 한 번만 진행
+let pitchInitError = null; // 마지막 초기화 실패 이유 (팝업 안내용)
 let isWorkletLoaded = false; // Worklet 모듈 로드 상태
 let currentPitchSemitones = 0; // 저장용
 let cachedVolume = 1.0; // 마지막 설정된 볼륨 (0~1) - 기본값 100%
 
 // 곡 변경 감지를 위한 변수들
-let lastVideoTitle = '';
-let lastVideoCurrentTime = 0;
-let lastVideoUrl = '';
+let lastVideoId = '';
 let videoChangeCheckInterval = null;
+
+// 화면(팝업)에 설정된 재생 속도. 유튜브 플레이어가 속도를 되돌리면 이 값으로 다시 맞춘다
+let desiredPlaybackRate = null;
+const rateGuardedVideos = new WeakSet();
 
 async function ensureAudioContextResumed(ctx) {
   if (!ctx) return;
   if (ctx.state === 'suspended') {
-    try { await ctx.resume(); } catch (e) { /* ignore */ }
+    // 자동재생 정책 때문에 resume()이 끝나지 않을 수 있으므로 오래 기다리지 않는다
+    // (재생/클릭 이벤트 때 다시 resume 됨)
+    try {
+      await Promise.race([ctx.resume(), new Promise((r) => setTimeout(r, 300))]);
+    } catch (e) { /* ignore */ }
   }
 }
 
@@ -40,16 +48,24 @@ function getYouTubeVideo() {
   return document.querySelector('video');
 }
 
-async function initializePitch() {
+function initializePitch() {
+  if (isPitchInitialized) {
+    return ensureAudioContextResumed(audioContext).then(() => true);
+  }
+  // 이미 진행 중이면 같은 결과를 기다린다.
+  // 동시에 두 번 진행되면 두 번째 createMediaElementSource가 실패해서 "Initializing..."에 멈췄다
+  if (!pitchInitPromise) {
+    pitchInitPromise = doInitializePitch().finally(() => { pitchInitPromise = null; });
+  }
+  return pitchInitPromise;
+}
+
+async function doInitializePitch() {
   const video = getYouTubeVideo();
   if (!video) {
     console.log('🎵 Pitch init: No video element found');
+    pitchInitError = 'noVideo';
     return false;
-  }
-  if (isPitchInitialized) {
-    console.log('🎵 Pitch already initialized');
-    await ensureAudioContextResumed(audioContext);
-    return true;
   }
 
   try {
@@ -68,12 +84,21 @@ async function initializePitch() {
         console.log('🎵 AudioWorklet module loaded');
       } catch (error) {
         console.error('🎵 Failed to load AudioWorklet module:', error);
+        pitchInitError = 'workletLoadFailed';
         return false;
       }
     }
 
     if (!mediaSourceNode) {
-      mediaSourceNode = audioContext.createMediaElementSource(video);
+      try {
+        mediaSourceNode = audioContext.createMediaElementSource(video);
+      } catch (error) {
+        // 확장을 다시 로드하면 이전 content script가 이미 영상 소리를 잡고 있다.
+        // 이 경우 탭을 새로고침해야만 다시 연결할 수 있다
+        console.error('🎵 Video audio already connected elsewhere:', error);
+        pitchInitError = 'needsReload';
+        return false;
+      }
       console.log('🎵 MediaElementSource created');
     }
 
@@ -119,11 +144,13 @@ async function initializePitch() {
     });
 
     isPitchInitialized = true;
+    pitchInitError = null;
     console.log('🎵 Pitch system initialized successfully');
     return true;
   } catch (error) {
     console.error('🎵 Pitch init failed:', error);
     isPitchInitialized = false;
+    pitchInitError = 'failed';
     return false;
   }
 }
@@ -150,9 +177,6 @@ async function applyPitchSemitones(semitones) {
       }
     }
     
-    // Always keep video at normal speed (pitch is handled by worklet)
-    video.playbackRate = 1.0;
-    
     console.log(`🎵 Pitch set to: ${clamped} semitones`);
     return true;
   } catch (e) {
@@ -169,7 +193,8 @@ function resetAllControls() {
   if (!video) return;
   
   try {
-    // 속도 리셋
+    // 속도 리셋 (새 영상에서는 더 이상 이전 속도를 강제하지 않음)
+    desiredPlaybackRate = null;
     video.playbackRate = 1.0;
     
     // 루프 리셋
@@ -217,30 +242,35 @@ function resetAllControls() {
   }
 }
 
+// 현재 영상 ID (watch?v=, /shorts/, /embed/, /live/ 주소 지원). 영상 페이지가 아니면 URL 경로
+function getVideoId() {
+  try {
+    const url = new URL(window.location.href);
+    const v = url.searchParams.get('v');
+    if (v) return v;
+    const match = url.pathname.match(/^\/(?:shorts|embed|live)\/([^/?#]+)/);
+    if (match) return match[1];
+    return url.pathname;
+  } catch (_) {
+    return window.location.href;
+  }
+}
+
 // 비디오 변경 감지 함수
+// 영상 ID가 바뀔 때만 다른 곡으로 본다.
+// 예전에는 제목 변경이나 큰 시간 이동(10초 뒤로, 30초 앞으로, 처음으로)도 곡 변경으로 봤다.
+// 그래서 구간 반복을 지정하거나(시작점으로 이동) 반복이 한 바퀴 돌 때마다 속도·피치·반복이 초기화됐다.
 function checkForVideoChange() {
   const video = getYouTubeVideo();
   if (!video) return;
   
-  const currentTitle = getVideoTitle();
-  const currentTime = video.currentTime;
-  const currentUrl = window.location.href;
-  
-  // 곡 변경 감지 조건
-  const titleChanged = currentTitle !== lastVideoTitle && lastVideoTitle !== '';
-  const urlChanged = currentUrl !== lastVideoUrl && lastVideoUrl !== '';
-  const timeJumpedBack = currentTime < lastVideoCurrentTime - 10; // 10초 이상 뒤로
-  const timeJumpedForward = currentTime > lastVideoCurrentTime + 30; // 30초 이상 앞으로
-  const timeResetToStart = lastVideoCurrentTime > 5 && currentTime < 2; // 끝에서 처음으로
-  
-  if (titleChanged || urlChanged || timeJumpedBack || timeJumpedForward || timeResetToStart) {
+  const currentId = getVideoId();
+  if (lastVideoId !== '' && currentId !== lastVideoId) {
     console.log('🎵 곡 변경 감지 - 모든 설정 리셋');
     resetAllControls();
   }
   
-  lastVideoTitle = currentTitle;
-  lastVideoCurrentTime = currentTime;
-  lastVideoUrl = currentUrl;
+  lastVideoId = currentId;
 }
 
 // 비디오 변경 감지 시작
@@ -250,10 +280,8 @@ function startVideoChangeDetection() {
   }
   
   // 초기값 설정
-  lastVideoTitle = getVideoTitle();
-  lastVideoUrl = window.location.href;
+  lastVideoId = getVideoId();
   const video = getYouTubeVideo();
-  lastVideoCurrentTime = video ? video.currentTime : 0;
   
   // 비디오 종료 이벤트 리스너 추가 (다음 곡으로 넘어갈 때 감지)
   if (video) {
@@ -304,10 +332,24 @@ function getVideoInfo() {
   };
 }
 
+// 유튜브 플레이어가 속도를 바꾸면(구간 이동, 화질 변경, 광고 후 등) 화면에 설정된 속도로 되돌린다
+function guardPlaybackRate(video) {
+  if (rateGuardedVideos.has(video)) return;
+  rateGuardedVideos.add(video);
+  video.addEventListener('ratechange', () => {
+    if (desiredPlaybackRate !== null && video.playbackRate !== desiredPlaybackRate) {
+      console.log(`⚡ Playback rate changed to ${video.playbackRate}x → restoring ${desiredPlaybackRate}x`);
+      video.playbackRate = desiredPlaybackRate;
+    }
+  });
+}
+
 // 재생 속도 설정
 function setPlaybackRate(speed) {
   const video = getYouTubeVideo();
   if (video) {
+    desiredPlaybackRate = speed;
+    guardPlaybackRate(video);
     video.playbackRate = speed;
     console.log(`Playback rate set to: ${speed}x`);
     return true;
@@ -398,14 +440,16 @@ function setLoop(start, end, enabled) {
   };
   video.addEventListener('ended', videoEndedHandler, { capture: true, passive: false });
 
-  // 2. 선제적 루프 점프 (0.5초 전부터 차단)
+  // 2. 끝점(B) 도달 시 시작점으로 점프
+  // 예전에는 B 0.5초 전에 미리 점프해서 B 직전이 잘렸고, B를 조정하면(B-1초로 이동) 0.5초 만에 튕겨 나갔다.
+  // 끝점은 이미 영상 끝에서 1초 전으로 제한되므로 B에서 바로 점프해도 자동재생으로 넘어가지 않는다.
+  // 이동(seek)이 진행 중일 때 다시 이동시키면 버퍼링이 겹쳐 버벅이므로 건너뛴다.
   videoTimeupdateHandler = () => {
-    if (!isLooping || video.paused) return;
+    if (!isLooping || video.paused || video.seeking) return;
     
     const currentTime = video.currentTime;
     
-    // 끝점 0.5초 전부터 적극 차단
-    if (currentTime >= loopEnd - 0.5) {
+    if (currentTime >= loopEnd) {
       console.log(`🔁 선제 점프: ${currentTime.toFixed(1)}s → ${loopStart.toFixed(1)}s`);
       video.currentTime = loopStart;
     } else if (currentTime < loopStart) {
@@ -415,25 +459,19 @@ function setLoop(start, end, enabled) {
   };
   video.addEventListener('timeupdate', videoTimeupdateHandler);
 
-  // 3. 백업 인터벌 (더 자주 체크 - 30ms)
+  // 3. 백업 인터벌 (timeupdate는 약 250ms 간격이라 30ms로 정확하게 B를 잡는다)
   loopInterval = setInterval(() => {
-    if (!video || video.paused || !isLooping) return;
+    if (!video || video.paused || !isLooping || video.seeking) return;
     
     const currentTime = video.currentTime;
     
-    // 끝점 근처면 즉시 차단
-    if (currentTime >= loopEnd - 0.5) {
-      video.currentTime = loopStart;
-    }
-    
-    // 비디오 duration 근처도 차단 (YouTube 자동재생 방지)
-    if (currentTime >= video.duration - 1) {
-      console.log('🚨 비디오 끝 도달 차단 → 루프 시작');
+    // 끝점 도달 또는 영상 끝 근처 (YouTube 자동재생 방지)
+    if (currentTime >= loopEnd || currentTime >= video.duration - 1) {
       video.currentTime = loopStart;
     }
   }, 30);
 
-  console.log(`✅ 3단계 루프 보호 활성화 (0.5초 선제 차단)`);
+  console.log(`✅ 3단계 루프 보호 활성화`);
   return true;
 }
 
@@ -448,8 +486,12 @@ function disablePitch() {
   if (!video) return false;
   
   try {
-    // 피치를 0으로 리셋
+    // 피치를 0으로 리셋 (워클릿 파라미터도 함께 — 안 그러면 소리가 계속 변조됨)
     currentPitchSemitones = 0;
+    if (pitchWorkletNode && pitchWorkletNode.parameters) {
+      const semitonesParam = pitchWorkletNode.parameters.get('semitones');
+      if (semitonesParam) semitonesParam.value = 0;
+    }
     
     // 피치 시스템이 초기화되어 있으면 비디오의 muted 해제
     if (isPitchInitialized) {
@@ -463,6 +505,110 @@ function disablePitch() {
     console.error('🎵 Failed to disable pitch:', error);
     return false;
   }
+}
+
+// ===== 키보드 단축키 =====
+
+function formatClock(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+// 팝업 없이 단축키를 쓸 때 화면 위에 잠깐 보여주는 안내
+let toastElement = null;
+let toastTimer = null;
+function showToast(text) {
+  try {
+    if (!toastElement) {
+      toastElement = document.createElement('div');
+      toastElement.setAttribute('data-video-controller-toast', '');
+      Object.assign(toastElement.style, {
+        position: 'fixed', top: '72px', left: '50%', transform: 'translateX(-50%)',
+        zIndex: '2147483647', padding: '8px 16px', borderRadius: '10px',
+        background: 'rgba(20, 20, 20, 0.88)', color: '#fff',
+        font: '600 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+        pointerEvents: 'none', transition: 'opacity 0.2s',
+      });
+    }
+    // 전체화면에서도 보이도록 전체화면 요소 안에 붙인다
+    const host = document.fullscreenElement || document.body;
+    if (toastElement.parentNode !== host) host.appendChild(toastElement);
+    toastElement.textContent = text;
+    toastElement.style.opacity = '1';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toastElement.style.opacity = '0'; }, 1200);
+  } catch (_) { /* 안내 표시 실패는 무시 */ }
+}
+
+function notifyStateChanged() {
+  // 팝업이 열려 있으면 화면을 다시 맞춘다 (닫혀 있으면 받는 쪽이 없어 실패하므로 무시)
+  try {
+    const p = chrome.runtime.sendMessage({ type: 'videoStateChanged' });
+    if (p && p.catch) p.catch(() => {});
+  } catch (_) { /* ignore */ }
+}
+
+async function handleShortcut(command) {
+  const video = getYouTubeVideo();
+  if (!video) return false;
+  const lastEnd = Math.max((video.duration || 0) - 1, 1);
+  const now = video.currentTime || 0;
+
+  switch (command) {
+    case 'speed-up':
+    case 'speed-down': {
+      const delta = command === 'speed-up' ? 0.1 : -0.1;
+      const base = desiredPlaybackRate !== null ? desiredPlaybackRate : video.playbackRate;
+      const speed = Math.round(Math.max(0.25, Math.min(4, base + delta)) * 100) / 100;
+      setPlaybackRate(speed);
+      showToast(`⚡ ${speed}x`);
+      break;
+    }
+    case 'pitch-up':
+    case 'pitch-down': {
+      const next = currentPitchSemitones + (command === 'pitch-up' ? 1 : -1);
+      const ok = await applyPitchSemitones(next);
+      if (!ok) return false;
+      showToast(`🎵 ${currentPitchSemitones > 0 ? '+' : ''}${currentPitchSemitones}`);
+      break;
+    }
+    case 'loop-a': {
+      // A만 지정: 반복 중이면 구간을 바로 갱신, 아니면 B를 기다린다
+      loopStart = Math.max(0, Math.min(now, lastEnd - 1));
+      if (loopEnd <= loopStart + 1) loopEnd = lastEnd;
+      if (isLooping) setLoop(loopStart, loopEnd, true);
+      showToast(`A ${formatClock(loopStart)}`);
+      break;
+    }
+    case 'loop-b': {
+      // B를 지정하면 A~B 반복 시작
+      const end = Math.min(Math.max(now, 1), lastEnd);
+      const start = loopStart < end - 1 ? loopStart : 0;
+      loopStart = start;
+      loopEnd = end;
+      setLoop(start, end, true);
+      showToast(`🔁 ${formatClock(start)} – ${formatClock(end)}`);
+      break;
+    }
+    case 'loop-toggle': {
+      if (isLooping) {
+        setLoop(loopStart, loopEnd, false);
+        showToast('🔁 Off');
+      } else if (loopEnd > loopStart + 1) {
+        setLoop(loopStart, loopEnd, true);
+        showToast(isLooping ? `🔁 ${formatClock(loopStart)} – ${formatClock(loopEnd)}` : '🔁 Off');
+      } else {
+        showToast('🔁 A/B를 먼저 지정하세요');
+        return false;
+      }
+      break;
+    }
+    default:
+      return false;
+  }
+
+  notifyStateChanged();
+  return true;
 }
 
 // 안전한 메시지 리스너
@@ -593,7 +739,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
       case 'initializePitch':
         (async () => {
           const ok = await initializePitch();
-          sendResponse({ success: ok });
+          sendResponse(ok ? { success: true } : { success: false, reason: pitchInitError });
         })();
         return true;
 
@@ -601,6 +747,13 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         const disableResult = disablePitch();
         sendResponse({ success: disableResult });
         break;
+
+      case 'shortcut':
+        (async () => {
+          const ok = await handleShortcut(request.command);
+          sendResponse({ success: ok });
+        })();
+        return true;
 
       case 'resetAll':
         resetAllControls();
